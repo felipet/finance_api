@@ -9,7 +9,8 @@
 //! defined herein. Thus this crate targets other libraries, so these can abstract
 //! whether a stock exchange is the _NASDAQ100_ or the _S&P500_.
 
-use std::fmt;
+use regex::Regex;
+use std::{convert::TryFrom, fmt};
 
 /// A stock market description.
 ///
@@ -141,6 +142,47 @@ pub trait Company {
     fn extra_id(&self) -> Option<&String>;
 }
 
+#[derive(Debug)]
+pub struct Ticker(String);
+
+#[allow(clippy::from_over_into)]
+impl Into<String> for Ticker {
+    fn into(self) -> String {
+        self.0
+    }
+}
+
+impl TryFrom<String> for Ticker {
+    type Error = String;
+
+    fn try_from(item: String) -> Result<Self, Self::Error> {
+        //let re_tickerformat = Regex::new(r"([[:alpha:]]{2,5})|([[:alpha:]]{2,3}/.[[:alpha:]]{1})").unwrap();
+        let matches = [
+            (
+                false,
+                Regex::new(r"[[:alpha:]]{3,5}|[[:alpha:]]{2,3}/.[[:alpha:]]{1}").unwrap(),
+            ),
+            (true, Regex::new(r"[^\d\.{2,}/-_]").unwrap()),
+        ];
+
+        if matches.iter().all(|x| x.0 ^ x.1.is_match(&item)) {
+            Ok(Ticker(item))
+        } else {
+            Err(format!("{} is not a valid Ticker", item))
+        }
+    }
+}
+
+impl TryFrom<&str> for Ticker {
+    type Error = String;
+
+    fn try_from(item: &str) -> Result<Self, Self::Error> {
+        let owned_item = item.to_owned();
+
+        Ticker::try_from(owned_item)
+    }
+}
+
 impl fmt::Display for dyn Company {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.ticker(), self.name())
@@ -150,11 +192,46 @@ impl fmt::Display for dyn Company {
 impl fmt::Debug for dyn Company {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("")
-         .field(&self.full_name())
-         .field(&self.name())
-         .field(&self.ticker())
-         .field(&self.isin())
-         .field(&self.extra_id())
-         .finish()
+            .field(&self.full_name())
+            .field(&self.name())
+            .field(&self.ticker())
+            .field(&self.isin())
+            .field(&self.extra_id())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn good_tickers_convert_from_string() {
+        let good_tickers = [
+            "SAN".to_owned(),
+            "TSLA".to_owned(),
+            "IAG".to_owned(),
+            "GRF.B".to_owned(),
+        ];
+
+        for ticker in good_tickers {
+            let temp_ticker: String = Ticker::try_from(&ticker[..]).unwrap().into();
+            assert_eq!(&temp_ticker, &ticker);
+        }
+    }
+
+    #[test]
+    fn bad_tickers_fail_to_convert_from_string() {
+        let bad_tickers = [
+            "SA0".to_owned(),
+            "T".to_owned(),
+            "TS.AS".to_owned(),
+            "SAB-".to_owned(),
+            "NotATicker".to_owned(),
+        ];
+
+        for ticker in bad_tickers {
+            assert!(Ticker::try_from(&ticker[..]).is_err());
+        }
     }
 }
